@@ -36,14 +36,32 @@ class SSTableDB:
         if key in self.memtable:
             return self.memtable[key]
         
-        # 2. Check Disk using Index
-        if key in self.index:
-            offset = self.index[key]
-            with open(self.sstable_file, "r") as f:
-                f.seek(offset) # Jump instantly to the line! (The Magic)
-                line = f.readline()
+        # 2. Sparse Search
+        # We need the largest key in self.index that is <= search_key
+        # In Python, we can use bisect to find the insertion point
+        sorted_index_keys = sorted(self.index.keys())
+        import bisect
+        i = bisect.bisect_right(sorted_index_keys, key)
+        
+        if i == 0:
+            return None # The key is smaller than the first indexed key
+        
+        # Get the "Block Start" key
+        closest_key = sorted_index_keys[i - 1]
+        offset = self.index[closest_key]
+        
+        # 3. Seek & Scan
+        with open(self.sstable_file, "r") as f:
+            f.seek(offset) 
+            
+            # Linearly scan until we find our key OR we go past it
+            for line in f:
                 k, v = line.strip().split(",")
-                return v
+                if k == key:
+                    return v
+                if k > key:
+                    # We went past it! The key doesn't exist.
+                    return None
         return None
 
 # Test Run
